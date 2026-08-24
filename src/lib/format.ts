@@ -38,7 +38,6 @@ export function createFormatters(locale: string) {
 
   const num = (value: number | null, fractionDigits = 2) => {
     if (value === null || !Number.isFinite(value)) return "—";
-    if (value === null || !Number.isFinite(value)) return "—";
     return value.toLocaleString(locale, {
       minimumFractionDigits: fractionDigits,
       maximumFractionDigits: fractionDigits,

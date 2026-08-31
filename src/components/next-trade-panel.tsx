@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowDownRight, ArrowUpRight, Crosshair } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, CheckCircle2, CircleAlert, Crosshair, RotateCcw, XCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,7 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Analysis } from "@/lib/analyze";
 import { useI18n } from "@/lib/i18n";
-import { planNextTrade, planSeverity, priceDecimals, type Direction } from "@/lib/next-trade";
+import {
+  planNextTrade,
+  planRespectsLimits,
+  planSeverity,
+  priceDecimals,
+  type Direction,
+  type LimitCheck,
+} from "@/lib/next-trade";
 import {
   CONSISTENCY_EXCELLENT,
   MAX_MARGIN_UTILISATION,
@@ -100,6 +107,8 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
   );
 
   const [entryOverride, setEntryOverride] = useState<number | null>(null);
+  const [stopOverride, setStopOverride] = useState<number | null>(null);
+  const [targetOverride, setTargetOverride] = useState<number | null>(null);
   const entryPrice = entryOverride ?? lastPriceFor(analysis, symbol) ?? fallbackEntry(symbol);
 
   const plan = useMemo(
@@ -113,6 +122,8 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
         threshold,
         profitBookedToday,
         marginCeiling,
+        stopPrice: stopOverride,
+        targetPrice: targetOverride,
       }),
     [
       analysis,
@@ -124,6 +135,8 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
       threshold,
       profitBookedToday,
       marginCeiling,
+      stopOverride,
+      targetOverride,
     ],
   );
 
@@ -152,11 +165,82 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
         return nt.issues.mustExceedMinimum(f.usd(v.minProfit));
       case "targetBelowRisk":
         return nt.issues.targetBelowRisk(f.usd(v.targetProfit), f.usd(v.riskUsd));
+      case "targetOverWindow":
+        return nt.issues.targetOverWindow(f.usd(v.targetProfit), f.usd(v.maxProfit));
+      case "stopWrongSide":
+        return nt.issues.stopWrongSide;
+      case "targetWrongSide":
+        return nt.issues.targetWrongSide;
+      case "stopTooTight":
+        return nt.issues.stopTooTight;
+      case "riskOverWorkingBudget":
+        return nt.issues.riskOverWorkingBudget(f.usd(v.riskUsd), f.usd(v.workingRiskUsd));
       case "splitEntriesShareCap":
         return nt.issues.splitEntriesShareCap;
       case "lossErodesRatio":
         return nt.issues.lossErodesRatio(f.usd(v.headroom));
     }
+  };
+
+  const checkText = (item: LimitCheck): string => {
+    const v = item.values ?? {};
+    const c = nt.checks;
+    switch (item.id) {
+      case "stopSide":
+        return item.pass ? c.stopSide.pass : c.stopSide.fail;
+      case "targetSide":
+        return item.pass ? c.targetSide.pass : c.targetSide.fail;
+      case "riskHardCap":
+        return (item.pass ? c.riskHardCap.pass : c.riskHardCap.fail)(
+          f.usd(v.riskUsd),
+          f.usd(v.hardRiskCapUsd),
+        );
+      case "riskWorking":
+        return (item.pass ? c.riskWorking.pass : c.riskWorking.fail)(
+          f.usd(v.riskUsd),
+          f.usd(v.workingRiskUsd),
+        );
+      case "marginHard":
+        return (item.pass ? c.marginHard.pass : c.marginHard.fail)(
+          f.pct(v.marginFraction),
+          f.pct(v.limit, 0),
+        );
+      case "marginWorking":
+        return (item.pass ? c.marginWorking.pass : c.marginWorking.fail)(
+          f.pct(v.marginFraction),
+          f.pct(v.ceiling, 0),
+        );
+      case "targetMax":
+        if (item.severity === "unknown") return c.targetMax.unknown;
+        return (item.pass ? c.targetMax.pass : c.targetMax.fail)(
+          f.usd(v.targetProfit),
+          f.usd(v.maxProfit),
+        );
+      case "targetMin":
+        if (item.severity === "unknown") return c.targetMin.unknown;
+        return (item.pass ? c.targetMin.pass : c.targetMin.fail)(f.usd(v.minProfit));
+      case "rewardRisk":
+        if (item.severity === "unknown") return c.rewardRisk.unknown;
+        return (item.pass ? c.rewardRisk.pass : c.rewardRisk.fail)(f.num(plan.rewardRisk ?? 0, 2));
+    }
+  };
+
+  const limitsOk = planRespectsLimits(plan);
+  const stopInvalid = plan.checks.some(
+    (item) => (item.id === "stopSide" || item.id === "riskHardCap") && !item.pass,
+  );
+  const targetInvalid = plan.checks.some(
+    (item) =>
+      (item.id === "targetSide" || item.id === "targetMax") &&
+      !item.pass &&
+      item.severity !== "unknown",
+  );
+
+  const readPrice = (raw: string): number | null => {
+    const trimmed = raw.trim();
+    if (trimmed === "") return null;
+    const value = Number(trimmed);
+    return Number.isFinite(value) ? value : null;
   };
 
   const headroom = (value: number | null) =>
@@ -197,6 +281,8 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
               onChange={(event) => {
                 setSymbol(event.target.value.toUpperCase());
                 setEntryOverride(null);
+                setStopOverride(null);
+                setTargetOverride(null);
               }}
             />
             <datalist id="nt-symbol-options">
@@ -212,7 +298,11 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
               id="nt-direction"
               className={selectClass}
               value={direction}
-              onChange={(event) => setDirection(event.target.value as Direction)}
+              onChange={(event) => {
+                setDirection(event.target.value as Direction);
+                setStopOverride(null);
+                setTargetOverride(null);
+              }}
             >
               <option value="buy">{nt.buy}</option>
               <option value="sell">{nt.sell}</option>
@@ -220,7 +310,7 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="nt-entry">{nt.entry}</Label>
+            <Label htmlFor="nt-entry">{nt.entryLevel}</Label>
             <Input
               id="nt-entry"
               type="number"
@@ -231,6 +321,44 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
                 setEntryOverride(Math.max(0, Number(event.target.value) || 0))
               }
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="nt-stop">{nt.stopLevel}</Label>
+            <Input
+              id="nt-stop"
+              type="number"
+              step="any"
+              min={0}
+              value={stopOverride ?? plan.suggestedStopPrice ?? ""}
+              aria-invalid={stopInvalid}
+              aria-describedby="nt-limits"
+              onChange={(event) => setStopOverride(readPrice(event.target.value))}
+            />
+            {plan.suggestedStopPrice !== null ? (
+              <p className="text-xs text-muted-foreground">
+                {nt.distance(f.num(Math.abs((stopOverride ?? plan.suggestedStopPrice) - entryPrice), decimals))}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="nt-target">{nt.targetLevel}</Label>
+            <Input
+              id="nt-target"
+              type="number"
+              step="any"
+              min={0}
+              value={targetOverride ?? plan.suggestedTargetPrice ?? ""}
+              aria-invalid={targetInvalid}
+              aria-describedby="nt-limits"
+              onChange={(event) => setTargetOverride(readPrice(event.target.value))}
+            />
+            {plan.maxProfitPrice !== null ? (
+              <p className="text-xs text-muted-foreground">
+                {nt.maxTargetLevel}: {f.num(plan.maxProfitPrice, decimals)}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-1.5">
@@ -264,7 +392,9 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-muted-foreground">{nt.riskHint(f.usd(plan.riskUsd))}</p>
+            <p className="text-xs text-muted-foreground">
+              {nt.riskHint(f.usd(plan.riskUsd), f.usd(plan.workingRiskUsd))}
+            </p>
           </div>
 
           <div className="space-y-1.5">
@@ -318,6 +448,76 @@ export function NextTradePanel({ analysis }: { analysis: Analysis }) {
             />
             <p className="text-xs text-muted-foreground">{nt.bookedTodayHint}</p>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {plan.suggestedStopPrice !== null && plan.suggestedTargetPrice !== null
+              ? nt.suggestedHint(
+                  f.num(plan.suggestedStopPrice, decimals),
+                  f.num(plan.suggestedTargetPrice, decimals),
+                )
+              : null}
+          </p>
+          <button
+            type="button"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-3 text-xs font-medium hover:bg-muted"
+            onClick={() => {
+              setStopOverride(null);
+              setTargetOverride(null);
+            }}
+          >
+            <RotateCcw className="size-3" aria-hidden />
+            {nt.useSuggested}
+          </button>
+        </div>
+
+        <div
+          id="nt-limits"
+          role="status"
+          aria-live="polite"
+          className={cn(
+            "rounded-xl border p-4 space-y-3",
+            limitsOk ? "border-positive/40 bg-positive/5" : "border-negative/40 bg-negative/5",
+          )}
+        >
+          <div>
+            <p className="text-sm font-semibold">{nt.limitsTitle}</p>
+            <p
+              className={cn(
+                "mt-1 text-sm font-medium",
+                limitsOk ? "text-positive" : "text-negative",
+              )}
+            >
+              {limitsOk ? nt.limitsPass : nt.limitsFail}
+            </p>
+          </div>
+          <ul className="space-y-2">
+            {plan.checks.map((item) => {
+              const Icon =
+                item.pass && item.severity !== "unknown"
+                  ? CheckCircle2
+                  : item.severity === "breach"
+                    ? XCircle
+                    : CircleAlert;
+              const tone =
+                item.pass && item.severity !== "unknown"
+                  ? "text-positive"
+                  : item.severity === "breach"
+                    ? "text-negative"
+                    : item.severity === "watch"
+                      ? "text-caution"
+                      : "text-muted-foreground";
+              return (
+                <li key={item.id} className="flex items-start gap-2 text-sm leading-relaxed">
+                  <Icon className={cn("mt-0.5 size-4 shrink-0", tone)} aria-hidden />
+                  <span className={cn(item.pass && item.severity !== "unknown" ? "text-foreground" : tone)}>
+                    {checkText(item)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
         <div className="rounded-xl border bg-muted/40 p-4">

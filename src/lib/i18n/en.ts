@@ -273,7 +273,7 @@ export const en = {
 
   nextTrade: {
     title: "Your next order",
-    desc: "The compliant size of a win depends on what is already in the cycle, so the safe take-profit moves every time you close a trade. Enter the setup you are looking at and this gives you the stop and target levels to place, and the reason for each.",
+    desc: "Type the entry, stop and take-profit you want to place. Lot size, risk budget and the rest still apply. The panel then tells you whether those prices stay inside the published limits, and what to change if they do not.",
     symbol: "Symbol",
     direction: "Direction",
     buy: "Buy",
@@ -282,8 +282,15 @@ export const en = {
     lots: "Lot size",
     lotsHint: (suggested: string, ceiling: string) =>
       `Up to ${suggested} keeps margin within ${ceiling}.`,
-    risk: "Risk on this trade idea",
-    riskHint: (amount: string) => `${amount} at the stop.`,
+    risk: "Risk budget for this trade idea",
+    riskHint: (actual: string, budget: string) =>
+      `${actual} at your stop. Budget ${budget}.`,
+    useSuggested: "Use suggested stop and target",
+    suggestedHint: (stop: string, target: string) =>
+      `Suggested from the budget and the ratio: SL ${stop} · TP ${target}`,
+    limitsTitle: "Do these levels respect the limits?",
+    limitsPass: "Yes — this order stays inside the selected limits",
+    limitsFail: "No — change a price, the lot size or the risk budget",
     threshold: "Concentration ratio to respect",
     thresholdBinding: "This ratio sets the highest compliant target below.",
     thresholdNotBinding: (winners: number) =>
@@ -339,11 +346,62 @@ export const en = {
       mustExceedMinimum: (minimum: string) =>
         `A win below ${minimum} leaves the existing peak outside the ratio. Anything smaller is safe to take, it just will not fix the concentration on its own.`,
       targetBelowRisk: (target: string, risk: string) =>
-        `The compliant target of ${target} is smaller than the ${risk} you are risking, so this setup is worse than break-even at a 50% hit rate. Cut the risk or build up profit first.`,
+        `The take-profit of ${target} is smaller than the ${risk} you are risking, so this setup is worse than break-even at a 50% hit rate. Cut the risk or raise the target.`,
+      targetOverWindow: (target: string, max: string) =>
+        `A win of ${target} sits above the ${max} cap at this ratio. Tighten the take-profit or wait until the cycle has more profit.`,
+      stopWrongSide:
+        "The stop is on the wrong side of the entry for this direction. On a buy it must sit below entry; on a sell, above.",
+      targetWrongSide:
+        "The take-profit is on the wrong side of the entry for this direction. On a buy it must sit above entry; on a sell, below.",
+      stopTooTight:
+        "Stop and entry are the same price, so the dollar risk cannot be measured. Move the stop.",
+      riskOverWorkingBudget: (risk: string, budget: string) =>
+        `This stop risks ${risk}, which is above the ${budget} you set as the working budget. It is still legal if it stays under the hard-breach cap, but it is larger than the size you chose.`,
       splitEntriesShareCap:
         "The risk cap applies to the whole trade idea. Splitting into several entries on the same symbol and direction, or re-entering within 10 minutes, shares this one budget rather than getting a new one.",
       lossErodesRatio: (headroom: string) =>
         `The cycle can absorb ${headroom} of further losses before your existing best result breaches the ratio on its own. Losing trades count in the denominator, so a drawdown raises the ratio without you placing a single oversized trade.`,
+    },
+    checks: {
+      stopSide: {
+        pass: "Stop is on the correct side of entry",
+        fail: "Stop is on the wrong side of entry for this direction",
+      },
+      targetSide: {
+        pass: "Take-profit is on the correct side of entry",
+        fail: "Take-profit is on the wrong side of entry for this direction",
+      },
+      riskHardCap: {
+        pass: (risk: string, cap: string) => `Risk at the stop is ${risk}, inside the ${cap} hard-breach cap`,
+        fail: (risk: string, cap: string) => `Risk at the stop is ${risk}, over the ${cap} hard-breach cap`,
+      },
+      riskWorking: {
+        pass: (risk: string, budget: string) => `Risk at the stop is ${risk}, inside the ${budget} budget`,
+        fail: (risk: string, budget: string) => `Risk at the stop is ${risk}, above the ${budget} budget`,
+      },
+      marginHard: {
+        pass: (margin: string, limit: string) => `Margin is ${margin}, below the ${limit} excessive-margin line`,
+        fail: (margin: string, limit: string) => `Margin is ${margin}, at or above the ${limit} excessive-margin line`,
+      },
+      marginWorking: {
+        pass: (margin: string, ceiling: string) => `Margin is ${margin}, inside the ${ceiling} working ceiling`,
+        fail: (margin: string, ceiling: string) => `Margin is ${margin}, above the ${ceiling} working ceiling`,
+      },
+      targetMax: {
+        pass: (profit: string, max: string) => `A win of ${profit} stays at or under the ${max} cap at this ratio`,
+        fail: (profit: string, max: string) => `A win of ${profit} is above the ${max} cap at this ratio`,
+        unknown: "The cycle is not in profit yet, so this win cannot be scored against a ratio",
+      },
+      targetMin: {
+        pass: (min: string) => `This take-profit is large enough to pull the existing peak back inside the ratio (minimum ${min})`,
+        fail: (min: string) => `This take-profit is below ${min}, so it will not pull the existing peak back inside the ratio`,
+        unknown: "No minimum win applies until the cycle is in profit and already concentrated",
+      },
+      rewardRisk: {
+        pass: (ratio: string) => `Reward to risk is ${ratio}:1`,
+        fail: (ratio: string) => `Reward to risk is ${ratio}:1, worse than 1:1`,
+        unknown: "Reward to risk cannot be measured until both stop and target are valid",
+      },
     },
   },
 

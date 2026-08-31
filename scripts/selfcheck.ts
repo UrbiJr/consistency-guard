@@ -10,7 +10,7 @@
 
 import { parseTrades } from "../src/lib/parse-trades";
 import { analyze, assessPayout, buildPlan, evaluateRules, DEFAULT_OPTIONS } from "../src/lib/analyze";
-import { planNextTrade } from "../src/lib/next-trade";
+import { planNextTrade, planRespectsLimits } from "../src/lib/next-trade";
 import { SAMPLE_CSV, EMAIL_CLAIM } from "../src/lib/sample-data";
 import { en } from "../src/lib/i18n/en";
 import { it } from "../src/lib/i18n/it";
@@ -208,6 +208,102 @@ check("empty cycle net profit", blank.netProfit, 0);
 const blankPlan = planNextTrade(blank, { ...setup, threshold: 0.4 });
 check("empty cycle has no established ratio", blankPlan.hasEstablishedRatio, false);
 check("empty cycle 40% needs 3 similar winners", blankPlan.minWinnersFromScratch, 3);
+
+function checkPass(plan: ReturnType<typeof planNextTrade>, id: string) {
+  return plan.checks.find((item) => item.id === id)?.pass ?? false;
+}
+
+check("suggested prices sit inside the selected limits", planRespectsLimits(at60), true);
+check("suggested stop-side check passes", checkPass(at60, "stopSide"), true);
+check("suggested target-max check passes", checkPass(at60, "targetMax"), true);
+
+const typedMatch = planNextTrade(analysis, {
+  ...setup,
+  threshold: 0.6,
+  stopPrice: at60.stopPrice,
+  targetPrice: at60.targetPrice,
+});
+check("typing the suggested stop keeps the price", typedMatch.stopPrice!, at60.stopPrice!);
+check("typing the suggested target keeps the price", typedMatch.targetPrice!, at60.targetPrice!, 0.02);
+check("typing the suggested prices still respects the limits", planRespectsLimits(typedMatch), true);
+check("typed matching plan is marked as a manual stop", typedMatch.manualStop, true);
+check("typed matching plan is marked as a manual target", typedMatch.manualTarget, true);
+
+const wrongStop = planNextTrade(analysis, {
+  ...setup,
+  threshold: 0.6,
+  stopPrice: 4110,
+});
+check(
+  "stop above entry on a buy is flagged",
+  wrongStop.issues.some((i) => i.id === "stopWrongSide"),
+  true,
+);
+check("wrong-side stop fails the side check", checkPass(wrongStop, "stopSide"), false);
+check("wrong-side stop does not respect the limits", planRespectsLimits(wrongStop), false);
+
+const wideStop = planNextTrade(analysis, {
+  ...setup,
+  threshold: 0.6,
+  stopPrice: 4070,
+});
+check("a 30-dollar gold stop on 0.5 lot risks 1500", wideStop.riskUsd, 1500);
+check(
+  "stop wider than the working budget is flagged",
+  wideStop.issues.some((i) => i.id === "riskOverWorkingBudget"),
+  true,
+);
+check("wide stop fails the working-budget check", checkPass(wideStop, "riskWorking"), false);
+check("wide stop still inside the 2% hard cap", checkPass(wideStop, "riskHardCap"), true);
+check(
+  "stop over the working budget does not respect the selected limits",
+  planRespectsLimits(wideStop),
+  false,
+);
+
+const overTarget = planNextTrade(analysis, {
+  ...setup,
+  threshold: 0.6,
+  targetPrice: 4300,
+});
+check(
+  "take-profit above the window is flagged",
+  overTarget.issues.some((i) => i.id === "targetOverWindow"),
+  true,
+);
+check("oversize take-profit fails the max-target check", checkPass(overTarget, "targetMax"), false);
+check("oversize take-profit does not respect the limits", planRespectsLimits(overTarget), false);
+
+const smallTarget = planNextTrade(analysis, {
+  ...setup,
+  threshold: 0.6,
+  targetPrice: 4110,
+});
+check("a small take-profit still sits under the cap", checkPass(smallTarget, "targetMax"), true);
+check(
+  "a small take-profit fails the restore-the-ratio check",
+  checkPass(smallTarget, "targetMin"),
+  false,
+);
+check(
+  "a small take-profit still respects the published limits",
+  planRespectsLimits(smallTarget),
+  true,
+);
+
+const sellWrongTarget = planNextTrade(analysis, {
+  ...setup,
+  direction: "sell",
+  threshold: 0.6,
+  targetPrice: 4200,
+});
+check(
+  "take-profit above entry on a sell is flagged",
+  sellWrongTarget.issues.some((i) => i.id === "targetWrongSide"),
+  true,
+);
+check("wrong-side take-profit fails the side check", checkPass(sellWrongTarget, "targetSide"), false);
+check("wrong-side take-profit does not respect the limits", planRespectsLimits(sellWrongTarget), false);
 
 // --- Translations ----------------------------------------------------------
 // Every key must exist in both languages, with the same shape, or the Italian

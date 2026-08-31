@@ -278,7 +278,7 @@ export const it: Dict = {
 
   nextTrade: {
     title: "Il tuo prossimo ordine",
-    desc: "La dimensione conforme di una vincita dipende da cosa c'è già nel ciclo, quindi il take profit sicuro si sposta ogni volta che chiudi un trade. Inserisci il setup che stai guardando e qui trovi i livelli di stop e target da impostare, con la ragione di ciascuno.",
+    desc: "Inserisci ingresso, stop e take profit che vuoi piazzare. Lotti, budget di rischio e il resto restano modificabili. Il pannello ti dice se quei prezzi restano dentro i limiti pubblicati, e cosa cambiare se non lo sono.",
     symbol: "Simbolo",
     direction: "Direzione",
     buy: "Acquisto",
@@ -287,8 +287,15 @@ export const it: Dict = {
     lots: "Dimensione in lotti",
     lotsHint: (suggested: string, ceiling: string) =>
       `Fino a ${suggested} il margine resta entro il ${ceiling}.`,
-    risk: "Rischio su questa trade idea",
-    riskHint: (amount: string) => `${amount} allo stop.`,
+    risk: "Budget di rischio su questa trade idea",
+    riskHint: (actual: string, budget: string) =>
+      `${actual} al tuo stop. Budget ${budget}.`,
+    useSuggested: "Usa stop e target suggeriti",
+    suggestedHint: (stop: string, target: string) =>
+      `Suggeriti da budget e rapporto: SL ${stop} · TP ${target}`,
+    limitsTitle: "Questi livelli rispettano i limiti?",
+    limitsPass: "Sì — questo ordine resta dentro i limiti scelti",
+    limitsFail: "No — cambia un prezzo, i lotti o il budget di rischio",
     threshold: "Rapporto di concentrazione da rispettare",
     thresholdBinding: "Questo rapporto imposta il target conforme massimo qui sotto.",
     thresholdNotBinding: (winners: number) =>
@@ -345,11 +352,62 @@ export const it: Dict = {
       mustExceedMinimum: (minimum: string) =>
         `Una vincita sotto ${minimum} lascia il picco esistente fuori dal rapporto. Qualcosa di più piccolo si può prendere tranquillamente, semplicemente non risolve da sola la concentrazione.`,
       targetBelowRisk: (target: string, risk: string) =>
-        `Il target conforme di ${target} è più piccolo dei ${risk} che stai rischiando, quindi con il 50% di operazioni vincenti questo setup è peggio del pareggio. Riduci il rischio o accumula prima del profitto.`,
+        `Il take profit di ${target} è più piccolo dei ${risk} che stai rischiando, quindi con il 50% di operazioni vincenti questo setup è peggio del pareggio. Riduci il rischio o alza il target.`,
+      targetOverWindow: (target: string, max: string) =>
+        `Una vincita di ${target} sta sopra il tetto di ${max} a questo rapporto. Stringi il take profit oppure aspetta che il ciclo abbia più profitto.`,
+      stopWrongSide:
+        "Lo stop è dalla parte sbagliata rispetto all'ingresso per questa direzione. Su un acquisto deve stare sotto l'ingresso; su una vendita, sopra.",
+      targetWrongSide:
+        "Il take profit è dalla parte sbagliata rispetto all'ingresso per questa direzione. Su un acquisto deve stare sopra l'ingresso; su una vendita, sotto.",
+      stopTooTight:
+        "Stop e ingresso sono lo stesso prezzo, quindi il rischio in dollari non è misurabile. Sposta lo stop.",
+      riskOverWorkingBudget: (risk: string, budget: string) =>
+        `Questo stop rischia ${risk}, sopra i ${budget} che hai impostato come budget. Resta legale se sta sotto il tetto di hard breach, ma è più grande della taglia che hai scelto.`,
       splitEntriesShareCap:
         "Il limite di rischio vale per l'intera trade idea. Frazionare in più ingressi sullo stesso simbolo e nella stessa direzione, o rientrare entro 10 minuti, condivide lo stesso budget invece di ottenerne uno nuovo.",
       lossErodesRatio: (headroom: string) =>
         `Il ciclo può assorbire ancora ${headroom} di perdite prima che il tuo miglior risultato esistente sfori il rapporto da solo. Le operazioni perdenti contano nel denominatore, quindi un drawdown alza il rapporto senza che tu apra un singolo trade sovradimensionato.`,
+    },
+    checks: {
+      stopSide: {
+        pass: "Lo stop è dalla parte giusta rispetto all'ingresso",
+        fail: "Lo stop è dalla parte sbagliata rispetto all'ingresso per questa direzione",
+      },
+      targetSide: {
+        pass: "Il take profit è dalla parte giusta rispetto all'ingresso",
+        fail: "Il take profit è dalla parte sbagliata rispetto all'ingresso per questa direzione",
+      },
+      riskHardCap: {
+        pass: (risk: string, cap: string) => `Il rischio allo stop è ${risk}, dentro il tetto di hard breach di ${cap}`,
+        fail: (risk: string, cap: string) => `Il rischio allo stop è ${risk}, sopra il tetto di hard breach di ${cap}`,
+      },
+      riskWorking: {
+        pass: (risk: string, budget: string) => `Il rischio allo stop è ${risk}, dentro il budget di ${budget}`,
+        fail: (risk: string, budget: string) => `Il rischio allo stop è ${risk}, sopra il budget di ${budget}`,
+      },
+      marginHard: {
+        pass: (margin: string, limit: string) => `Il margine è ${margin}, sotto la soglia di margine eccessivo del ${limit}`,
+        fail: (margin: string, limit: string) => `Il margine è ${margin}, alla o sopra la soglia di margine eccessivo del ${limit}`,
+      },
+      marginWorking: {
+        pass: (margin: string, ceiling: string) => `Il margine è ${margin}, dentro il tetto operativo del ${ceiling}`,
+        fail: (margin: string, ceiling: string) => `Il margine è ${margin}, sopra il tetto operativo del ${ceiling}`,
+      },
+      targetMax: {
+        pass: (profit: string, max: string) => `Una vincita di ${profit} resta al o sotto il tetto di ${max} a questo rapporto`,
+        fail: (profit: string, max: string) => `Una vincita di ${profit} è sopra il tetto di ${max} a questo rapporto`,
+        unknown: "Il ciclo non è ancora in profitto, quindi questa vincita non si può misurare contro un rapporto",
+      },
+      targetMin: {
+        pass: (min: string) => `Questo take profit è abbastanza grande da riportare il picco esistente dentro il rapporto (minimo ${min})`,
+        fail: (min: string) => `Questo take profit è sotto ${min}, quindi non riporta il picco esistente dentro il rapporto`,
+        unknown: "Nessun minimo di vincita si applica finché il ciclo non è in profitto e già concentrato",
+      },
+      rewardRisk: {
+        pass: (ratio: string) => `Il rapporto rischio/rendimento è ${ratio}:1`,
+        fail: (ratio: string) => `Il rapporto rischio/rendimento è ${ratio}:1, peggio di 1:1`,
+        unknown: "Il rapporto rischio/rendimento non è misurabile finché stop e target non sono validi",
+      },
     },
   },
 
